@@ -17,7 +17,7 @@ AgentScope is a local-first observability platform for AI agents and LLM usage. 
 - Hosted SaaS backend.
 - Multi-user auth.
 - Public network service.
-- Full web dashboard.
+- Hosted web dashboard. MVP includes a local-only dashboard command bound to localhost.
 - Storing raw private conversations by default.
 
 ## Core features
@@ -47,12 +47,15 @@ AgentScope is a local-first observability platform for AI agents and LLM usage. 
    - Config under `~/.agentscope`.
 
 5. CLI-first UX
-   - Ingest, summarize, review, export, doctor commands.
+   - Ingest, summarize, review, export, dashboard, nightly, doctor commands.
+
+6. Mac mini automation
+   - User launchd job for nightly OpenClaw import, insight extraction, and GBrain dry-run export.
+   - No hosted server or external queue.
 
 ## Later features
 
-- Local-only dashboard.
-- Launchd installer.
-- OpenClaw native session importer.
+- Richer local-only dashboard with approval/edit actions.
+- OpenClaw native session importer enhancements.
 - Claude/Gemini wrappers.
 - Parquet/DuckDB analytics exports.
