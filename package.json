@@ -1,0 +1,36 @@
+{
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "latest",
+    "commander": "latest",
+    "fast-glob": "latest",
+    "nanoid": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest",
+    "@types/node": "latest"
+  },
+  "bin": {
+    "agentscope": "dist/cli.js"
+  },
+  "type": "module",
+  "name": "agent-scope",
+  "version": "0.1.0",
+  "description": "Local-first observability and memory mining for AI agents.",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ]
+}
