@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { openDb, initStore } from './db.js';
-import { ingestCodexJsonl, ingestConversationFile } from './ingest.js';
+import { ingestClaudeJsonl, ingestCodexJsonl, ingestConversationFile, ingestGeminiJsonl } from './ingest.js';
 import { dbPath, dataDir } from './paths.js';
 import { listRuns, models, printTable, projects, summary } from './reports.js';
-import { exportGbrain, reviewInsights, runInsights } from './insights.js';
+import { exportGbrain, reviewInsights, runInsights, setInsightStatus } from './insights.js';
 import { ingestOpenClaw } from './openclaw.js';
 import { startDashboard } from './dashboard.js';
-import { installLaunchd, runNightly } from './nightly.js';
+import { installLaunchd, nightlyStatus, runNightly } from './nightly.js';
+import { exportAnalytics } from './analytics.js';
 
 const program = new Command();
 program.name('agentscope').description('Local-first observability and memory mining for AI agents').version('0.1.0');
@@ -20,6 +21,18 @@ const ingest = program.command('ingest').description('Ingest logs and traces');
 ingest.command('codex <jsonl>').description('Ingest codex-usage-logger JSONL').action((jsonl) => {
   const db = openDb();
   const result = ingestCodexJsonl(db, jsonl);
+  db.close();
+  console.log(result);
+});
+ingest.command('claude <jsonl>').description('Ingest Claude usage JSONL').action((jsonl) => {
+  const db = openDb();
+  const result = ingestClaudeJsonl(db, jsonl);
+  db.close();
+  console.log(result);
+});
+ingest.command('gemini <jsonl>').description('Ingest Gemini usage JSONL').action((jsonl) => {
+  const db = openDb();
+  const result = ingestGeminiJsonl(db, jsonl);
   db.close();
   console.log(result);
 });
@@ -62,6 +75,16 @@ insights.command('review').description('Show pending insight candidates').action
   printTable(reviewInsights(db));
   db.close();
 });
+insights.command('approve <id>').description('Approve an insight candidate').action((id) => {
+  const db = openDb();
+  console.log(setInsightStatus(db, id, 'approved'));
+  db.close();
+});
+insights.command('reject <id>').description('Reject an insight candidate').action((id) => {
+  const db = openDb();
+  console.log(setInsightStatus(db, id, 'rejected'));
+  db.close();
+});
 
 const gbrain = program.command('gbrain').description('GBrain export helpers');
 gbrain.command('ingest').option('--dry-run', 'Do not mark exported', true).option('--apply', 'Mark exported after writing file').description('Export approved/low-risk candidates for GBrain ingestion').action((opts) => {
@@ -69,6 +92,19 @@ gbrain.command('ingest').option('--dry-run', 'Do not mark exported', true).optio
   console.log(exportGbrain(db, !opts.apply));
   db.close();
 });
+
+const exportCmd = program.command('export').description('Export AgentScope data');
+exportCmd.command('analytics')
+  .option('--format <format>', 'jsonl, csv, or duckdb-sql', 'jsonl')
+  .option('--out <file>', 'Output file')
+  .option('--since <iso>', 'Only export runs started after this ISO timestamp')
+  .description('Export runs for local analytics and DuckDB workflows')
+  .action((opts) => {
+    const db = openDb();
+    const result = exportAnalytics(db, opts);
+    db.close();
+    console.log(result);
+  });
 
 program.command('dashboard').option('--host <host>', 'Bind host', '127.0.0.1').option('--port <port>', 'Port', '3737').description('Start the local-only dashboard').action((opts) => {
   const db = openDb();
@@ -78,6 +114,7 @@ program.command('dashboard').option('--host <host>', 'Bind host', '127.0.0.1').o
 const nightly = program.command('nightly').description('Nightly import and memory-mining automation');
 nightly.command('run').description('Run OpenClaw import, insight extraction, and GBrain dry-run export once').action(() => runNightly(process.argv[1]));
 nightly.command('install').description('Install a user launchd job for 23:30 local time daily').action(() => console.log(installLaunchd(process.argv[1])));
+nightly.command('status').description('Show launchd status and recent nightly logs').action(() => console.dir(nightlyStatus(), { depth: null }));
 
 program.command('doctor').description('Check local setup').action(() => {
   const db = openDb();

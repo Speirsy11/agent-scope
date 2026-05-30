@@ -23,47 +23,73 @@ function deriveProject(record: any): string | undefined {
   return record.project || record.metadata?.project || record.metadata?.repo || record.cwd?.split('/').filter(Boolean).pop();
 }
 
-export function ingestCodexJsonl(db: Db, file: string): { inserted: number; skipped: number } {
+function normalizeUsageRecord(r: any, source: string, providerDefault: string) {
+  const input = pickNumber(r, ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens', 'estimatedInputTokens'])
+    || pickNumber(r.usage, ['inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens', 'input_tokens_details'])
+    || pickNumber(r.message?.usage, ['input_tokens', 'prompt_tokens']);
+  const output = pickNumber(r, ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens', 'estimatedOutputTokens'])
+    || pickNumber(r.usage, ['outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens'])
+    || pickNumber(r.message?.usage, ['output_tokens', 'completion_tokens']);
+  const total = pickNumber(r, ['total_tokens', 'totalTokens', 'tokens', 'estimatedTotalTokens'])
+    || pickNumber(r.usage, ['totalTokens', 'total_tokens', 'tokens'])
+    || pickNumber(r.message?.usage, ['total_tokens', 'tokens'])
+    || input + output;
+  const provider = r.provider || r.metadata?.provider || r.usage?.provider || providerDefault;
+  const model = r.model || r.modelId || r.metadata?.model || r.metadata?.modelId || r.message?.model || 'unknown';
+  const cwd = r.cwd || r.metadata?.cwd || r.workspace || r.session?.cwd;
+  const git = gitMetadata(cwd);
+  const startedAt = r.started_at || r.startedAt || r.timestamp || r.created_at || r.createdAt || nowIso();
+  return {
+    id: r.id || r.runId || `${source}_${nanoid()}`,
+    source,
+    external_id: r.id || r.runId || r.request_id || r.message?.id || sha256(JSON.stringify(r)),
+    project: deriveProject(r),
+    provider,
+    model,
+    workflow: r.workflow || r.metadata?.workflow || r.command || r.tool,
+    cwd,
+    git_remote: git.git_remote,
+    git_branch: git.git_branch,
+    git_commit: git.git_commit,
+    started_at: startedAt,
+    ended_at: r.ended_at || r.endedAt || r.completed_at || r.completedAt || undefined,
+    duration_ms: pickNumber(r, ['duration_ms', 'durationMs', 'elapsedMs', 'elapsed_ms']),
+    status: r.status || (r.success === false || r.error ? 'failure' : 'success'),
+    input_tokens: input,
+    output_tokens: output,
+    total_tokens: total,
+    estimated_tokens: r.estimated === false || r.estimated_tokens === false || r.usage?.estimated === false ? 0 : 1,
+    estimated_cost_usd: typeof r.cost_usd === 'number' ? r.cost_usd : typeof r.costUsd === 'number' ? r.costUsd : estimateCostUsd(provider, model, input, output),
+    error: r.error ? String(r.error?.message || r.error) : undefined,
+    metadata: jsonStringify(r.metadata || r),
+  };
+}
+
+export function ingestUsageJsonl(db: Db, file: string, source: string, providerDefault: string): { inserted: number; skipped: number } {
   const rows = readJsonl(file);
   let inserted = 0, skipped = 0;
   const stmt = db.prepare(`INSERT OR IGNORE INTO runs (id, source, external_id, project, provider, model, workflow, cwd, git_remote, git_branch, git_commit, started_at, ended_at, duration_ms, status, input_tokens, output_tokens, total_tokens, estimated_tokens, estimated_cost_usd, error, metadata) VALUES (@id,@source,@external_id,@project,@provider,@model,@workflow,@cwd,@git_remote,@git_branch,@git_commit,@started_at,@ended_at,@duration_ms,@status,@input_tokens,@output_tokens,@total_tokens,@estimated_tokens,@estimated_cost_usd,@error,@metadata)`);
   const tx = db.transaction((records: any[]) => {
     for (const r of records) {
-      const input = pickNumber(r, ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokens', 'estimatedInputTokens']) || pickNumber(r.usage, ['inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens']);
-      const output = pickNumber(r, ['output_tokens', 'outputTokens', 'completion_tokens', 'completionTokens', 'estimatedOutputTokens']) || pickNumber(r.usage, ['outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens']);
-      const total = pickNumber(r, ['total_tokens', 'totalTokens', 'tokens', 'estimatedTotalTokens']) || pickNumber(r.usage, ['totalTokens', 'total_tokens', 'tokens']) || input + output;
-      const provider = r.provider || r.metadata?.provider || 'openai';
-      const model = r.model || r.metadata?.model || 'unknown';
-      const cwd = r.cwd || r.metadata?.cwd;
-      const git = gitMetadata(cwd);
-      const rec = {
-        id: r.id || `run_${nanoid()}`,
-        source: 'codex-usage-logger',
-        external_id: r.id || r.runId || sha256(JSON.stringify(r)),
-        project: deriveProject(r),
-        provider,
-        model,
-        workflow: r.workflow || r.metadata?.workflow,
-        cwd,
-        ...git,
-        started_at: r.started_at || r.startedAt || r.timestamp || nowIso(),
-        ended_at: r.ended_at || r.endedAt || undefined,
-        duration_ms: pickNumber(r, ['duration_ms', 'durationMs', 'elapsedMs']),
-        status: r.status || (r.success === false ? 'failure' : 'success'),
-        input_tokens: input,
-        output_tokens: output,
-        total_tokens: total,
-        estimated_tokens: r.estimated === false || r.estimated_tokens === false || r.usage?.estimated === false ? 0 : 1,
-        estimated_cost_usd: typeof r.cost_usd === 'number' ? r.cost_usd : estimateCostUsd(provider, model, input, output),
-        error: r.error ? String(r.error) : undefined,
-        metadata: jsonStringify(r.metadata || r),
-      };
+      const rec = normalizeUsageRecord(r, source, providerDefault);
       const info = stmt.run(rec);
       if (info.changes) { inserted++; appendJsonl(archivePath(), { type: 'run', ...rec }); } else skipped++;
     }
   });
   tx(rows as any[]);
   return { inserted, skipped };
+}
+
+export function ingestCodexJsonl(db: Db, file: string): { inserted: number; skipped: number } {
+  return ingestUsageJsonl(db, file, 'codex-usage-logger', 'openai');
+}
+
+export function ingestClaudeJsonl(db: Db, file: string): { inserted: number; skipped: number } {
+  return ingestUsageJsonl(db, file, 'claude-usage-jsonl', 'anthropic');
+}
+
+export function ingestGeminiJsonl(db: Db, file: string): { inserted: number; skipped: number } {
+  return ingestUsageJsonl(db, file, 'gemini-usage-jsonl', 'google');
 }
 
 const Message = z.object({ role: z.string(), content: z.string().default(''), created_at: z.string().optional(), metadata: z.record(z.string(), z.unknown()).optional() });

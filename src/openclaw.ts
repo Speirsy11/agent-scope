@@ -6,6 +6,7 @@ import { Db } from './db.js';
 import { archivePath } from './paths.js';
 import { redactText } from './redact.js';
 import { appendJsonl, jsonStringify, nowIso, parseJson, sha256, sinceToIso } from './util.js';
+import { gitMetadata } from './git.js';
 
 export type OpenClawImportOptions = {
   dir?: string;
@@ -39,20 +40,22 @@ function isSessionJsonl(file: string, includeAll = false) {
   return true;
 }
 
-function textFromContent(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
+function textFromContent(content: unknown): { text: string; toolCalls: number } {
+  if (typeof content === 'string') return { text: content, toolCalls: 0 };
+  if (!Array.isArray(content)) return { text: '', toolCalls: 0 };
   const parts: string[] = [];
+  let toolCalls = 0;
   for (const part of content as any[]) {
     if (!part || typeof part !== 'object') continue;
     if (part.type === 'text' && typeof part.text === 'string') parts.push(part.text);
     if (part.type === 'output_text' && typeof part.text === 'string') parts.push(part.text);
+    if (String(part.type || '').includes('tool') || part.name || part.toolName) toolCalls++;
     // Deliberately skip reasoning/thinking signatures and bulky tool payloads.
   }
-  return parts.join('\n').trim();
+  return { text: parts.join('\n').trim(), toolCalls };
 }
 
-function parseSessionFile(file: string): { sessionId: string; startedAt: string; cwd?: string; provider?: string; model?: string; messages: Message[] } | undefined {
+function parseSessionFile(file: string): { sessionId: string; startedAt: string; cwd?: string; provider?: string; model?: string; workflow?: string; messages: Message[]; messageCounts: Record<string, number>; toolCalls: number } | undefined {
   const records = readJsonl(file);
   if (records.length === 0) return undefined;
   let sessionId = path.basename(file).replace(/\.jsonl.*/, '');
@@ -60,12 +63,16 @@ function parseSessionFile(file: string): { sessionId: string; startedAt: string;
   let cwd: string | undefined;
   let provider: string | undefined;
   let model: string | undefined;
+  let workflow: string | undefined;
   const messages: Message[] = [];
+  const messageCounts: Record<string, number> = {};
+  let toolCalls = 0;
   for (const r of records) {
     if (r.type === 'session') {
       sessionId = r.id || sessionId;
       startedAt = r.timestamp || startedAt;
       cwd = r.cwd || cwd;
+      workflow = r.workflow || r.source || workflow;
     }
     if (r.type === 'model_change') {
       provider = r.provider || provider;
@@ -77,12 +84,14 @@ function parseSessionFile(file: string): { sessionId: string; startedAt: string;
     }
     if (r.type === 'message' && r.message?.role) {
       const content = textFromContent(r.message.content);
-      if (!content) continue;
-      messages.push({ role: r.message.role, content, created_at: r.timestamp || new Date(r.message.timestamp || Date.now()).toISOString(), metadata: { openclawMessageId: r.id } });
+      toolCalls += content.toolCalls;
+      if (!content.text) continue;
+      messageCounts[r.message.role] = (messageCounts[r.message.role] || 0) + 1;
+      messages.push({ role: r.message.role, content: content.text, created_at: r.timestamp || new Date(r.message.timestamp || Date.now()).toISOString(), metadata: { openclawMessageId: r.id, toolCalls: content.toolCalls } });
     }
   }
   if (!messages.length) return undefined;
-  return { sessionId, startedAt, cwd, provider, model, messages };
+  return { sessionId, startedAt, cwd, provider, model, workflow, messages, messageCounts, toolCalls };
 }
 
 function insertConversation(db: Db, parsed: NonNullable<ReturnType<typeof parseSessionFile>>, file: string, privacyMode: OpenClawImportOptions['privacyMode']) {
@@ -91,7 +100,8 @@ function insertConversation(db: Db, parsed: NonNullable<ReturnType<typeof parseS
   const convStmt = db.prepare(`INSERT OR REPLACE INTO conversations (id, source, project, title, started_at, ended_at, privacy_mode, metadata) VALUES (@id,@source,@project,@title,@started_at,@ended_at,@privacy_mode,@metadata)`);
   const msgStmt = db.prepare(`INSERT OR REPLACE INTO messages (id, conversation_id, role, created_at, content_hash, content_chars, content_redacted, content_raw, metadata) VALUES (@id,@conversation_id,@role,@created_at,@content_hash,@content_chars,@content_redacted,@content_raw,@metadata)`);
   const project = parsed.cwd?.split('/').filter(Boolean).pop() || 'openclaw';
-  convStmt.run({ id, source: 'openclaw', project, title: `OpenClaw ${parsed.sessionId}`, started_at: parsed.startedAt, ended_at: parsed.messages.at(-1)?.created_at, privacy_mode: mode, metadata: jsonStringify({ sessionId: parsed.sessionId, file, cwd: parsed.cwd, provider: parsed.provider, model: parsed.model }) });
+  const git = gitMetadata(parsed.cwd);
+  convStmt.run({ id, source: 'openclaw', project, title: `OpenClaw ${parsed.sessionId}`, started_at: parsed.startedAt, ended_at: parsed.messages.at(-1)?.created_at, privacy_mode: mode, metadata: jsonStringify({ sessionId: parsed.sessionId, file, cwd: parsed.cwd, provider: parsed.provider, model: parsed.model, workflow: parsed.workflow, messageCounts: parsed.messageCounts, toolCalls: parsed.toolCalls, ...git }) });
   for (let idx = 0; idx < parsed.messages.length; idx++) {
     const m = parsed.messages[idx];
     const redacted = redactText(m.content);
@@ -117,12 +127,13 @@ function ingestUsageCache(db: Db, dir: string, sinceIso: string) {
     const startedAt = new Date(entry.sessionSummary.firstActivity || entry.scannedAt || Date.now()).toISOString();
     if (startedAt < sinceIso) continue;
     const endedAt = new Date(entry.sessionSummary.lastActivity || entry.scannedAt || Date.now()).toISOString();
+    const provider = entry.modelUsage?.[0]?.provider || entry.sessionSummary?.modelUsage?.[0]?.provider || 'openai-codex';
     const rec = {
       id: `run_openclaw_${entry.sessionId || sha256(sessionFile).slice(0, 16)}`,
       source: 'openclaw-usage-cache',
       external_id: entry.sessionId || sessionFile,
       project: 'openclaw',
-      provider: entry.modelUsage?.[0]?.provider || entry.sessionSummary?.modelUsage?.[0]?.provider || 'openai-codex',
+      provider,
       model: entry.modelUsage?.[0]?.model || entry.sessionSummary?.modelUsage?.[0]?.model || 'unknown',
       workflow: 'openclaw-session',
       cwd: path.dirname(sessionFile),
@@ -134,12 +145,13 @@ function ingestUsageCache(db: Db, dir: string, sinceIso: string) {
       output_tokens: entry.totals.output || 0,
       total_tokens: entry.totals.totalTokens || 0,
       estimated_tokens: 0,
-      estimated_cost_usd: entry.totals.totalCost || 0,
+      estimated_cost_usd: provider === 'openai-codex' ? 0 : entry.totals.totalCost || 0,
       metadata: jsonStringify({ sessionFile, cacheRead: entry.totals.cacheRead, cacheWrite: entry.totals.cacheWrite, toolUsage: entry.sessionSummary.toolUsage, messageCounts: entry.sessionSummary.messageCounts }),
     };
     const info = stmt.run(rec);
     if (info.changes) { inserted++; appendJsonl(archivePath(), { type: 'run', ...rec }); } else skipped++;
   }
+  db.prepare(`UPDATE runs SET estimated_cost_usd=0 WHERE provider='openai-codex' AND estimated_cost_usd != 0`).run();
   return { inserted, skipped };
 }
 

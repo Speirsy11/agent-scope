@@ -28,6 +28,7 @@ AgentScope is a local-first observability platform for AI agents and LLM usage. 
    - Exact vs estimated token flag.
    - Provider/model/project/workflow attribution.
    - Estimated cost by pricing table.
+   - Codex, Claude, Gemini, and OpenClaw usage import paths.
 
 2. Conversation logging
    - Conversation/session records.
@@ -47,15 +48,20 @@ AgentScope is a local-first observability platform for AI agents and LLM usage. 
    - Config under `~/.agentscope`.
 
 5. CLI-first UX
-   - Ingest, summarize, review, export, dashboard, nightly, doctor commands.
+   - Ingest, summarize, review, approve/reject, export, dashboard, nightly, doctor commands.
 
 6. Mac mini automation
    - User launchd job for nightly OpenClaw import, insight extraction, and GBrain dry-run export.
+   - Status command that reports launchd state and recent logs.
    - No hosted server or external queue.
+
+7. Local analytics exports
+   - JSONL and CSV run exports for scriptable analysis.
+   - DuckDB SQL helper that imports the generated CSV and creates a local `agentscope_runs` table.
 
 ## Later features
 
-- Richer local-only dashboard with approval/edit actions.
-- OpenClaw native session importer enhancements.
+- Editable insight summaries in the dashboard.
+- Richer OpenClaw native session importer coverage as OpenClaw schemas evolve.
 - Claude/Gemini wrappers.
-- Parquet/DuckDB analytics exports.
+- Parquet export once AgentScope intentionally takes on an analytics dependency.

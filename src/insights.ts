@@ -56,6 +56,11 @@ export function reviewInsights(db: Db, status = 'pending') {
   return db.prepare(`SELECT id, date, kind, sensitivity, destination, project, summary FROM insight_candidates WHERE status=? ORDER BY date DESC, created_at DESC`).all(status);
 }
 
+export function setInsightStatus(db: Db, id: string, status: 'pending' | 'approved' | 'rejected' | 'exported') {
+  const info = db.prepare(`UPDATE insight_candidates SET status=? WHERE id=?`).run(status, id);
+  return { id, status, changed: info.changes };
+}
+
 export function exportGbrain(db: Db, dryRun = true) {
   const rows = db.prepare(`SELECT * FROM insight_candidates WHERE status IN ('approved','pending') AND destination='gbrain' AND sensitivity='low' ORDER BY date`).all() as any[];
   const docs = rows.map((r) => `Type: ${r.kind}\nDate: ${r.date}\nProject: ${r.project || 'unknown'}\nSource: AgentScope ${r.id}\n\n${r.summary}\n`);

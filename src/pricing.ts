@@ -10,6 +10,7 @@ const table: Record<string, Pricing> = {
 };
 
 export function estimateCostUsd(provider = 'openai', model = '', inputTokens = 0, outputTokens = 0): number {
+  if (provider === 'openai-codex') return 0;
   const pricing = table[`${provider}:${model}`] || table[`openai:${model}`];
   if (!pricing) return 0;
   return (inputTokens / 1_000_000) * pricing.inputPerMTok + (outputTokens / 1_000_000) * pricing.outputPerMTok;

@@ -37,3 +37,25 @@ export function installLaunchd(argv0 = process.argv[1]) {
   childProcess.execFileSync('launchctl', ['enable', `gui/${uid}/${label}`], { stdio: 'inherit' });
   return { label, plistPath, schedule: '23:30 local time daily' };
 }
+
+export function nightlyStatus() {
+  const label = 'local.agentscope.nightly';
+  const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+  const logDir = path.join(os.homedir(), '.agentscope', 'logs');
+  const uid = typeof process.getuid === 'function' ? process.getuid() : Number(process.env.UID || 0);
+  let launchctl = '';
+  try {
+    launchctl = childProcess.execFileSync('launchctl', ['print', `gui/${uid}/${label}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    launchctl = String((error as any).stderr || (error as Error).message);
+  }
+  const tail = (file: string) => fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(-20).join('\n') : '';
+  return {
+    label,
+    plistPath,
+    installed: fs.existsSync(plistPath),
+    launchctl: launchctl.slice(0, 4000),
+    stdoutTail: tail(path.join(logDir, 'nightly.out.log')),
+    stderrTail: tail(path.join(logDir, 'nightly.err.log')),
+  };
+}
