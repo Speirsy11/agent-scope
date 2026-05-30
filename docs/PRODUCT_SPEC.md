@@ -28,7 +28,8 @@ AgentScope is a local-first observability platform for AI agents and LLM usage. 
    - Exact vs estimated token flag.
    - Provider/model/project/workflow attribution.
    - Estimated cost by pricing table.
-   - Codex, Claude, Gemini, and OpenClaw usage import paths.
+   - Native Codex CLI thread usage import.
+   - Codex JSONL, Claude, Gemini, and OpenClaw usage import paths.
 
 2. Conversation logging
    - Conversation/session records.
@@ -46,6 +47,7 @@ AgentScope is a local-first observability platform for AI agents and LLM usage. 
    - SQLite for queryable state.
    - JSONL archive for raw normalized events.
    - Config under `~/.agentscope`.
+   - Native Codex import reads `~/.codex/state_5.sqlite` locally and does not store raw prompts/responses.
 
 5. CLI-first UX
    - Ingest, summarize, review, approve/reject, export, dashboard, nightly, doctor commands.

@@ -9,6 +9,7 @@ import { ingestOpenClaw } from './openclaw.js';
 import { startDashboard } from './dashboard.js';
 import { installLaunchd, nightlyStatus, runNightly } from './nightly.js';
 import { exportAnalytics } from './analytics.js';
+import { ingestCodexLocal } from './codex.js';
 
 const program = new Command();
 program.name('agentscope').description('Local-first observability and memory mining for AI agents').version('0.1.0');
@@ -24,6 +25,16 @@ ingest.command('codex <jsonl>').description('Ingest codex-usage-logger JSONL').a
   db.close();
   console.log(result);
 });
+ingest.command('codex-local')
+  .description('Ingest local Codex CLI thread usage from ~/.codex/state_5.sqlite')
+  .option('--state-db <file>', 'Codex state SQLite file')
+  .option('--since <since>', 'today, 7d, 30d, or ISO date', '30d')
+  .action((opts) => {
+    const db = openDb();
+    const result = ingestCodexLocal(db, opts);
+    db.close();
+    console.log(result);
+  });
 ingest.command('claude <jsonl>').description('Ingest Claude usage JSONL').action((jsonl) => {
   const db = openDb();
   const result = ingestClaudeJsonl(db, jsonl);

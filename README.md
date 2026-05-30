@@ -18,6 +18,7 @@ npm install
 npm run build
 node dist/cli.js init
 node dist/cli.js ingest codex ~/.codex-usage/runs.jsonl
+node dist/cli.js ingest codex-local --since 30d
 node dist/cli.js ingest claude ~/claude-usage.jsonl
 node dist/cli.js ingest gemini ~/gemini-usage.jsonl
 node dist/cli.js summary --since 7d
@@ -50,6 +51,7 @@ The nightly job runs OpenClaw import, daily insight extraction, and a GBrain dry
 ```bash
 agentscope init
 agentscope ingest codex <jsonl>
+agentscope ingest codex-local [--since 30d] [--state-db ~/.codex/state_5.sqlite]
 agentscope ingest claude <jsonl>
 agentscope ingest gemini <jsonl>
 agentscope ingest conversation <json|jsonl>
@@ -71,9 +73,21 @@ agentscope nightly status
 agentscope doctor
 ```
 
+## Codex CLI Usage
+
+For normal Codex CLI usage without OpenClaw, import local thread usage from Codex's state database:
+
+```bash
+agentscope ingest codex-local --since 30d
+agentscope summary --since 30d
+agentscope dashboard
+```
+
+This reads `~/.codex/state_5.sqlite`, imports one run per Codex thread, and uses the `threads.tokens_used` total. It stores cwd/project, model/provider, git metadata, duration, and total tokens. It does not import raw prompts or responses.
+
 ## Status
 
-MVP foundation: local SQLite store, Codex/Claude/Gemini JSONL import, OpenClaw session/usage import, conversation import, summaries, local dashboard with filters/detail views and insight approval actions, nightly launchd automation/status, insight candidates, analytics exports, and GBrain export/import hook.
+MVP foundation: local SQLite store, native Codex CLI usage import, Codex/Claude/Gemini JSONL import, OpenClaw session/usage import, conversation import, summaries, local dashboard with filters/detail views and insight approval actions, nightly launchd automation/status, insight candidates, analytics exports, and GBrain export/import hook.
 
 ## Dashboard
 
